@@ -1,0 +1,8 @@
+{
+  "name": "Xiaomimi Matcha",
+  "description": "Xiaomimi Matcha: kafe spesialis matcha ceremonial grade. Minuman matcha segar dan bubuk matcha asli Uji, Kyoto.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
