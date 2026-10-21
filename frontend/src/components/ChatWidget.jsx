@@ -43,7 +43,7 @@ export default function ChatWidget() {
       const data = await sendChatMessage(updatedMessages)
       setMessages([...updatedMessages, { from: 'bot', text: data.text }])
     } catch (err) {
-      console.error('Failed to query Gemini API:', err)
+      console.error('Failed to query AI API:', err)
       setMessages([
         ...updatedMessages,
         {
@@ -78,7 +78,7 @@ export default function ChatWidget() {
           <div className="chat-avatar">🍵</div>
           <div className="chat-header-text">
             <b>Xiaomimi Assistant</b>
-            <span className="online">Aktif — Gemini RAG AI</span>
+            <span className="online">Aktif</span>
           </div>
           <button className="chat-close" aria-label="Tutup chat" onClick={() => setOpen(false)}>
             ✕
