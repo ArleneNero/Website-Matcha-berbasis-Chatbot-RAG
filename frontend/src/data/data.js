@@ -7,12 +7,12 @@ export const NAV_LINKS = [
 ]
 
 export const IMAGES = {
-  signature: '/images/signature-cup.webp',
-  strawberryCut: '/images/strawberry-cutout.webp',
-  strawberry: '/images/strawberry-matcha.jpg',
-  latte: '/images/iced-matcha-latte.jpg',
-  usucha: '/images/hot-usucha.jpg',
-  powder: '/images/matcha-powder.jpg',
+  signature: './images/signature-cup.webp',
+  strawberryCut: './images/strawberry-cutout.webp',
+  strawberry: './images/strawberry-matcha.jpg',
+  latte: './images/iced-matcha-latte.jpg',
+  usucha: './images/hot-usucha.jpg',
+  powder: './images/matcha-powder.jpg',
 }
 
 export const STATS = [
@@ -111,3 +111,4 @@ export const CHAT_MESSAGES = [
 ]
 
 export const EASE_OUT_EXPO = [0.22, 1, 0.36, 1]
+
