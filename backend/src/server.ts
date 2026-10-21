@@ -17,55 +17,51 @@ const getDirname = () => {
 };
 const __dirname = getDirname();
 
-export async function createServer() {
-  const app = express();
-  app.use(cors());
-  app.use(express.json());
+const app = express();
+app.use(cors());
+app.use(express.json());
 
-  // Mount API routes
-  app.use('/api', chatRouter);
+// Mount API routes
+app.use('/api', chatRouter);
 
-  app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'xiaomimi-matcha-backend' });
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', service: 'xiaomimi-matcha-backend' });
+});
+
+// Resolve frontend dist path
+const distPath = [
+  path.join(process.cwd(), 'frontend', 'dist'),
+  path.join(process.cwd(), 'dist', 'client'),
+  path.join(process.cwd(), 'dist'),
+  path.resolve(__dirname, '../../frontend/dist'),
+].find((p) => fs.existsSync(p)) || path.join(process.cwd(), 'frontend', 'dist');
+
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
   });
-
-  // Resolve frontend dist path
-  const distPath = [
-    path.join(process.cwd(), 'frontend', 'dist'),
-    path.join(process.cwd(), 'dist', 'client'),
-    path.join(process.cwd(), 'dist'),
-    path.resolve(__dirname, '../../frontend/dist'),
-  ].find((p) => fs.existsSync(p)) || path.join(process.cwd(), 'frontend', 'dist');
-
-  if (fs.existsSync(distPath)) {
-    app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  return app;
 }
 
-async function startServer() {
-  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-  const app = await createServer();
+// Background pre-warming
+if (process.env.AI_API_KEY || process.env.GEMINI_API_KEY) {
+  try {
+    const ai = getAiClient();
+    vectorStore.ensureIndexed(ai).catch((err) => {
+      console.warn('[RAG Engine] Background indexing warning:', err?.message || err);
+    });
+  } catch (err: any) {
+    console.warn('[RAG Engine] Pre-warming skipped:', err?.message || err);
+  }
+}
 
+// Standalone server mode
+if (process.env.NODE_ENV !== 'production' || process.env.RENDER || process.env.PORT) {
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🍵 Xiaomimi Backend running on http://0.0.0.0:${PORT}`);
-
-    // Pre-warm RAG vector index in background if API key is present
-    if (process.env.AI_API_KEY || process.env.GEMINI_API_KEY) {
-      try {
-        const ai = getAiClient();
-        vectorStore.ensureIndexed(ai).catch((err) => {
-          console.warn('[RAG Engine] Background indexing warning:', err?.message || err);
-        });
-      } catch (err: any) {
-        console.warn('[RAG Engine] Pre-warming skipped:', err?.message || err);
-      }
-    }
   });
 }
 
-startServer();
+// Export default app for Vercel Serverless Function
+export default app;
