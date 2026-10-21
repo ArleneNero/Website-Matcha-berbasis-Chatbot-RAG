@@ -34,7 +34,7 @@ export default function NewFlavour() {
               alt="Cup Strawberry Matcha dengan lapisan strawberry, susu, dan matcha hijau"
               initial={{ opacity: 0, x: 220 }}
               whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true, amount: 0.35 }}
+              viewport={{ once: true, amount: 0.1, margin: "100px" }}
               transition={{ duration: 0.9, ease: EASE_OUT_EXPO }}
             />
           </div>
