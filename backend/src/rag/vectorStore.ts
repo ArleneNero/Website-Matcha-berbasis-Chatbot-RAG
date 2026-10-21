@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import PDFDocument from 'pdfkit';
 import { GoogleGenAI } from '@google/genai';
+import { QdrantClient } from '@qdrant/js-client-rest';
 import { loadAndChunkPDF, DynamicChunk } from './pdfLoader.js';
 
 const getDirname = () => {
@@ -59,62 +59,36 @@ const DEFAULT_SECTIONS = [
   `14. Keberlanjutan & Garansi\nTukar 10 kaleng bubuk kosong = Gratis 1 kaleng Latte Blend 150g. Garansi minuman salah buat/rusak diganti baru gratis di hari yang sama.`
 ];
 
-function ensurePDFExistsOnDisk(pdfPath: string): Promise<void> {
-  return new Promise((resolve) => {
-    const dir = path.dirname(pdfPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-
-    let needsCreation = false;
-    if (!fs.existsSync(pdfPath)) {
-      needsCreation = true;
-    } else {
-      const stat = fs.statSync(pdfPath);
-      if (stat.size < 500) {
-        needsCreation = true;
-      }
-    }
-
-    if (!needsCreation) {
-      return resolve();
-    }
-
-    console.log(`📄 [PDF Generator] Writing binary PDF file to disk: ${pdfPath}`);
-    const doc = new PDFDocument({ margin: 40 });
-    const writeStream = fs.createWriteStream(pdfPath);
-
-    writeStream.on('finish', () => {
-      console.log(`✅ [PDF Generator] Binary PDF file write completed.`);
-      resolve();
-    });
-
-    writeStream.on('error', (err: any) => {
-      console.error(`❌ [PDF Generator] Error writing PDF:`, err);
-      resolve();
-    });
-
-    doc.pipe(writeStream);
-    doc.fontSize(20).text('Xiaomimi Matcha — Dokumen Informasi Kafe (Knowledge Base)', { align: 'center' });
-    doc.moveDown();
-
-    for (const sec of DEFAULT_SECTIONS) {
-      doc.fontSize(11).text(sec);
-      doc.moveDown();
-    }
-
-    doc.end();
-  });
-}
-
 export class VectorStore {
-  private chunks: DynamicChunk[] = DEFAULT_SECTIONS.map((sec, idx) => ({
-    id: `chunk_${idx + 1}`,
-    section: sec.split('\n')[0].substring(0, 60),
-    text: sec,
-  }));
+  private chunks: DynamicChunk[] = [];
   private isIndexed: boolean = false;
   private indexingPromise: Promise<void> | null = null;
+  private qdrantClient: QdrantClient | null = null;
+  private collectionName: string = 'xiaomimi_knowledge';
+
+  constructor() {
+    this.chunks = DEFAULT_SECTIONS.map((sec, idx) => {
+      const match = sec.match(/^(\d+\.[^\n]+)\n([\s\S]*)$/);
+      const sectionName = match ? match[1].trim() : `Bagian ${idx + 1}`;
+      const content = match ? match[2].trim() : sec.trim();
+      return {
+        id: `chunk_${idx + 1}`,
+        section: sectionName,
+        text: content,
+      };
+    });
+
+    const qdrantUrl = process.env.QDRANT_URL;
+    const qdrantApiKey = process.env.QDRANT_API_KEY;
+
+    if (qdrantUrl) {
+      this.qdrantClient = new QdrantClient({
+        url: qdrantUrl,
+        apiKey: qdrantApiKey || undefined,
+      });
+      console.log('⚡ [RAG Engine] Qdrant Client configured with URL:', qdrantUrl);
+    }
+  }
 
   public async ensureIndexed(ai: GoogleGenAI): Promise<void> {
     if (this.isIndexed) return;
@@ -122,8 +96,6 @@ export class VectorStore {
 
     this.indexingPromise = (async () => {
       const pdfPath = resolvePdfPath();
-      await ensurePDFExistsOnDisk(pdfPath);
-
       try {
         const pdfChunks = await loadAndChunkPDF(pdfPath);
         if (pdfChunks && pdfChunks.length > 0) {
@@ -133,7 +105,7 @@ export class VectorStore {
         console.warn('PDF parsing error, keeping default section chunks:', e);
       }
 
-      console.log(`⚡ [RAG Engine] Generating embeddings for ${this.chunks.length} PDF chunks using gemini-embedding-2-preview...`);
+      console.log(`⚡ [RAG Engine] Generating embeddings for ${this.chunks.length} PDF chunks using text-embedding-004...`);
       await Promise.allSettled(
         this.chunks.map(async (chunk) => {
           try {
@@ -150,8 +122,46 @@ export class VectorStore {
         })
       );
 
+      // If Qdrant is connected, sync collection & vectors to Qdrant Cloud/Server
+      if (this.qdrantClient) {
+        try {
+          const collections = await this.qdrantClient.getCollections();
+          const exists = collections.collections.some((c) => c.name === this.collectionName);
+
+          if (!exists) {
+            await this.qdrantClient.createCollection(this.collectionName, {
+              vectors: {
+                size: 768, // text-embedding-004 dimension
+                distance: 'Cosine',
+              },
+            });
+            console.log(`✅ [Qdrant] Collection "${this.collectionName}" created successfully!`);
+          }
+
+          const points = this.chunks
+            .filter((c) => c.embedding && c.embedding.length > 0)
+            .map((c, i) => ({
+              id: i + 1,
+              vector: c.embedding!,
+              payload: {
+                section: c.section,
+                text: c.text,
+              },
+            }));
+
+          if (points.length > 0) {
+            await this.qdrantClient.upsert(this.collectionName, {
+              points,
+            });
+            console.log(`✅ [Qdrant] Upserted ${points.length} vectors to Qdrant!`);
+          }
+        } catch (qErr) {
+          console.warn('[Qdrant] Upsert warning, in-memory store remains active:', qErr);
+        }
+      }
+
       this.isIndexed = true;
-      console.log(`✅ [RAG Engine] Successfully indexed ${this.chunks.length} chunks from PDF into memory vector store!`);
+      console.log(`✅ [RAG Engine] Successfully indexed ${this.chunks.length} chunks into vector store!`);
     })();
 
     return this.indexingPromise;
@@ -166,11 +176,6 @@ export class VectorStore {
 
     if (this.chunks.length === 0) return [];
 
-    const queryLower = userQuery.toLowerCase();
-    const keywords = queryLower
-      .split(/[\s,?.!]+/)
-      .filter((w) => w.length >= 3 && !['ada', 'apa', 'yang', 'ini', 'dan', 'dari', 'bisa', 'dong'].includes(w));
-
     try {
       const queryEmbeddingRes = await ai.models.embedContent({
         model: 'text-embedding-004',
@@ -179,13 +184,38 @@ export class VectorStore {
 
       const queryVector = queryEmbeddingRes.embedding?.values;
 
+      // 1. If Qdrant is active and has embeddings, search via Qdrant
+      if (this.qdrantClient && queryVector) {
+        try {
+          const searchResult = await this.qdrantClient.search(this.collectionName, {
+            vector: queryVector,
+            limit: topK,
+          });
+
+          if (searchResult && searchResult.length > 0) {
+            return searchResult.map((res, i) => ({
+              id: `qdrant_${res.id || i}`,
+              section: (res.payload?.section as string) || `Bagian ${i + 1}`,
+              text: (res.payload?.text as string) || '',
+            }));
+          }
+        } catch (qSearchErr) {
+          console.warn('[Qdrant Search] Fallback to in-memory cosine similarity:', qSearchErr);
+        }
+      }
+
+      // 2. Fallback: In-memory Cosine Similarity + Keyword boost
+      const queryLower = userQuery.toLowerCase();
+      const keywords = queryLower
+        .split(/[\s,?.!]+/)
+        .filter((w) => w.length >= 3 && !['ada', 'apa', 'yang', 'ini', 'dan', 'dari', 'bisa', 'dong'].includes(w));
+
       const scoredChunks = this.chunks.map((chunk) => {
         let vectorScore = 0;
         if (queryVector && chunk.embedding) {
           vectorScore = calculateCosineSimilarity(queryVector, chunk.embedding);
         }
 
-        // Keyword boost
         let keywordScore = 0;
         const chunkTextLower = (chunk.section + ' ' + chunk.text).toLowerCase();
         for (const kw of keywords) {
