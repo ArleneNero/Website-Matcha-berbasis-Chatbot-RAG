@@ -59,6 +59,16 @@ const DEFAULT_SECTIONS = [
   `14. Keberlanjutan & Garansi\nTukar 10 kaleng bubuk kosong = Gratis 1 kaleng Latte Blend 150g. Garansi minuman salah buat/rusak diganti baru gratis di hari yang sama.`
 ];
 
+function extractEmbeddingValues(res: any): number[] | undefined {
+  if (res?.embedding?.values) {
+    return res.embedding.values;
+  }
+  if (res?.embeddings && res.embeddings.length > 0 && res.embeddings[0]?.values) {
+    return res.embeddings[0].values;
+  }
+  return undefined;
+}
+
 export class VectorStore {
   private chunks: DynamicChunk[] = [];
   private isIndexed: boolean = false;
@@ -85,6 +95,7 @@ export class VectorStore {
       this.qdrantClient = new QdrantClient({
         url: qdrantUrl,
         apiKey: qdrantApiKey || undefined,
+        checkCompatibility: false,
       });
       console.log('⚡ [RAG Engine] Qdrant Client configured with URL:', qdrantUrl);
     }
@@ -109,12 +120,13 @@ export class VectorStore {
       await Promise.allSettled(
         this.chunks.map(async (chunk) => {
           try {
-            const res = await ai.models.embedContent({
+            const res = (await ai.models.embedContent({
               model: 'text-embedding-004',
               contents: `${chunk.section}: ${chunk.text}`,
-            });
-            if (res.embedding?.values) {
-              chunk.embedding = res.embedding.values;
+            })) as any;
+            const values = extractEmbeddingValues(res);
+            if (values) {
+              chunk.embedding = values;
             }
           } catch (err) {
             console.error(`Error embedding PDF chunk ${chunk.id}:`, err);
@@ -177,23 +189,24 @@ export class VectorStore {
     if (this.chunks.length === 0) return [];
 
     try {
-      const queryEmbeddingRes = await ai.models.embedContent({
+      const queryEmbeddingRes = (await ai.models.embedContent({
         model: 'text-embedding-004',
         contents: userQuery,
-      });
+      })) as any;
 
-      const queryVector = queryEmbeddingRes.embedding?.values;
+      const queryVector = extractEmbeddingValues(queryEmbeddingRes);
 
       // 1. If Qdrant is active and has embeddings, search via Qdrant
       if (this.qdrantClient && queryVector) {
         try {
-          const searchResult = await this.qdrantClient.search(this.collectionName, {
-            vector: queryVector,
+          const searchResult = await (this.qdrantClient as any).query(this.collectionName, {
+            query: queryVector,
             limit: topK,
           });
 
-          if (searchResult && searchResult.length > 0) {
-            return searchResult.map((res, i) => ({
+          const points = searchResult?.points || searchResult;
+          if (Array.isArray(points) && points.length > 0) {
+            return points.map((res: any, i: number) => ({
               id: `qdrant_${res.id || i}`,
               section: (res.payload?.section as string) || `Bagian ${i + 1}`,
               text: (res.payload?.text as string) || '',
