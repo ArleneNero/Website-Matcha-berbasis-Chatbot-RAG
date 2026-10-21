@@ -10,7 +10,7 @@
     "dev:backend": "cd backend && npm run dev",
     "build": "npm run build:frontend && npm run build:backend",
     "build:frontend": "cd frontend && npm run build",
-    "build:backend": "esbuild backend/src/server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build:backend": "esbuild backend/src/server.ts --bundle --platform=node --format=cjs --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "preview": "cd frontend && npm run preview"
   },
@@ -37,3 +37,4 @@
     "vite": "^5.4.10"
   }
 }
+
