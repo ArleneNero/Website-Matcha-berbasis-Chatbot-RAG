@@ -145,7 +145,7 @@ export default function ChatWidget() {
             </button>
           </div>
           <div className="chat-status-note">
-            ✨ Terhubung ke backend Gemini API dengan konteks RAG Xiaomimi Matcha
+            ✨ Asisten AI siap menjawab pertanyaan seputar menu kami.
           </div>
         </form>
       </div>
