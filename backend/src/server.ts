@@ -29,13 +29,7 @@ export async function createServer() {
     res.json({ status: 'ok', service: 'xiaomimi-matcha-backend' });
   });
 
-  // Resolve frontend paths
-  const frontendPath = [
-    path.join(process.cwd(), 'frontend'),
-    path.resolve(__dirname, '../../frontend'),
-    path.resolve(__dirname, '../frontend'),
-  ].find((p) => fs.existsSync(p)) || path.join(process.cwd(), 'frontend');
-
+  // Resolve frontend dist path
   const distPath = [
     path.join(process.cwd(), 'frontend', 'dist'),
     path.join(process.cwd(), 'dist', 'client'),
@@ -43,22 +37,7 @@ export async function createServer() {
     path.resolve(__dirname, '../../frontend/dist'),
   ].find((p) => fs.existsSync(p)) || path.join(process.cwd(), 'frontend', 'dist');
 
-  // Vite middleware in dev, static files in prod
-  if (process.env.NODE_ENV !== 'production' && fs.existsSync(frontendPath)) {
-    try {
-      const viteModule = await import('vite').catch(() => null);
-      if (viteModule && typeof viteModule.createServer === 'function') {
-        const vite = await viteModule.createServer({
-          root: frontendPath,
-          server: { middlewareMode: true },
-          appType: 'spa',
-        });
-        app.use(vite.middlewares);
-      }
-    } catch {
-      // In production or when vite is omitted, serve static files
-    }
-  } else if (fs.existsSync(distPath)) {
+  if (fs.existsSync(distPath)) {
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
