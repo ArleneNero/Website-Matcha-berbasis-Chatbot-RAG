@@ -52,7 +52,7 @@ PETUNJUK RESPON:
 
   const prompt = `Riwayat percakapan:\n${formattedHistory}\n\nJawablah pertanyaan terakhir pelanggan dengan lengkap dan ramah:`;
 
-  const modelsToTry = ['gemini-3.6-flash', 'gemini-2.5-flash'];
+  const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
   let lastError: any = null;
 
   for (const model of modelsToTry) {

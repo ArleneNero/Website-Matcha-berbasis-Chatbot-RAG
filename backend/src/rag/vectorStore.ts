@@ -138,7 +138,7 @@ export class VectorStore {
         this.chunks.map(async (chunk) => {
           try {
             const res = await ai.models.embedContent({
-              model: 'gemini-embedding-2-preview',
+              model: 'text-embedding-004',
               contents: `${chunk.section}: ${chunk.text}`,
             });
             if (res.embedding?.values) {
@@ -173,7 +173,7 @@ export class VectorStore {
 
     try {
       const queryEmbeddingRes = await ai.models.embedContent({
-        model: 'gemini-embedding-2-preview',
+        model: 'text-embedding-004',
         contents: userQuery,
       });
 
