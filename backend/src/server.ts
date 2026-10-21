@@ -3,7 +3,6 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import { chatRouter } from './routes/chatRoute.js';
 import { vectorStore } from './rag/vectorStore.js';
 import { getAiClient } from './services/geminiService.js';
@@ -46,12 +45,19 @@ export async function createServer() {
 
   // Vite middleware in dev, static files in prod
   if (process.env.NODE_ENV !== 'production' && fs.existsSync(frontendPath)) {
-    const vite = await createViteServer({
-      root: frontendPath,
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+    try {
+      const viteModule = await import('vite').catch(() => null);
+      if (viteModule && typeof viteModule.createServer === 'function') {
+        const vite = await viteModule.createServer({
+          root: frontendPath,
+          server: { middlewareMode: true },
+          appType: 'spa',
+        });
+        app.use(vite.middlewares);
+      }
+    } catch {
+      // In production or when vite is omitted, serve static files
+    }
   } else if (fs.existsSync(distPath)) {
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
@@ -84,4 +90,3 @@ async function startServer() {
 }
 
 startServer();
-
