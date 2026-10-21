@@ -1,24 +1,7 @@
-import { GoogleGenAI } from '@google/genai';
-
-let aiClient: GoogleGenAI | null = null;
-
-export function getAiClient(): GoogleGenAI {
-  if (!aiClient) {
-    const apiKey = process.env.AI_API_KEY || process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('AI_API_KEY environment variable is required');
-    }
-    aiClient = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
-  }
-  return aiClient;
-}
+/**
+ * Bariska Cloud AI Service (OpenAI-compatible)
+ * Supports https://api.bariska.cloud/v1
+ */
 
 export interface ChatMessage {
   from: 'user' | 'bot';
@@ -26,54 +9,71 @@ export interface ChatMessage {
 }
 
 export async function generateGroundedReply(
-  ai: GoogleGenAI,
   retrievedContextText: string,
   messages: ChatMessage[]
 ): Promise<string> {
-  const recentMessages = messages.slice(-6);
-  const formattedHistory = recentMessages
-    .map((m) => {
-      const sender = m.from === 'user' ? 'Pelanggan' : 'Xiaomimi Assistant';
-      return `${sender}: ${m.text}`;
-    })
-    .join('\n');
+  const apiKey =
+    process.env.Bariska_Cloud_API ||
+    process.env.BARISKA_API_KEY ||
+    process.env.AI_API_KEY ||
+    process.env.GEMINI_API_KEY;
 
-  const systemInstruction = `Kamu adalah Xiaomimi Assistant, CS AI resmi yang ramah, hangat, dan sangat membantu untuk kafe "Xiaomimi Matcha".
-
-Jawablah pertanyaan pelanggan berdasarkan Informasi Resmi dari Dokumen PDF yang diperoleh melalui sistem RAG berikut:
-
-${retrievedContextText}
-
-PETUNJUK RESPON:
-1. Jawablah pertanyaan pelanggan secara lengkap, jelas, dan ramah sesuai data dari dokumen RAG di atas.
-2. Bila pelanggan bertanya tentang promo, menu, harga, jam buka, fasilitas, atau lokasi, sebutkan semua poin relevan yang terdapat di dokumen RAG.
-3. Gunakan Bahasa Indonesia yang sopan dan ramah dengan 1-2 emotikon khas (seperti 🍵, ✨, 🌸).
-4. Jika informasi yang ditanyakan tidak tersedia dalam dokumen RAG di atas, sampaikan dengan santun bahwa informasi tersebut belum ada dalam dokumen resmi kami.`;
-
-  const prompt = `Riwayat percakapan:\n${formattedHistory}\n\nJawablah pertanyaan terakhir pelanggan dengan lengkap dan ramah:`;
-
-  const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-  let lastError: any = null;
-
-  for (const model of modelsToTry) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-          systemInstruction,
-          temperature: 0.3,
-        },
-      });
-
-      if (response.text) {
-        return response.text;
-      }
-    } catch (err: any) {
-      console.warn(`[Gemini Service] Model ${model} encountered error, trying fallback...`, err?.message || err);
-      lastError = err;
-    }
+  if (!apiKey) {
+    throw new Error('API Key untuk Bariska Cloud (Bariska_Cloud_API / AI_API_KEY) belum disetel');
   }
 
-  throw lastError || new Error('Gagal memproses tanggapan dari Gemini AI.');
+  const rawBaseUrl = process.env.BARISKA_BASE_URL || 'https://api.bariska.cloud/v1';
+  const baseUrl = rawBaseUrl.replace(/\/+$/, '');
+  const endpoint = `${baseUrl}/chat/completions`;
+
+  const recentMessages = messages.slice(-8);
+  const systemInstruction = `Kamu adalah Xiaomimi Assistant, CS AI resmi yang ramah, hangat, dan sangat membantu untuk kafe "Xiaomimi Matcha".
+
+Gunakan informasi resmi dari basis data kafe berikut untuk menjawab:
+${retrievedContextText}
+
+ATURAN UTAMA:
+1. Jawab pertanyaan seputar menu, harga, promo, fasilitas, atau lokasi Xiaomimi Matcha dengan sopan dan ramah (sertakan emotikon khas seperti 🍵, ✨).
+2. Jika ada hal yang ditanyakan di luar konteks kafe atau tidak ada datanya, beritahukan dengan santun bahwa informasi tersebut belum tersedia.`;
+
+  const conversationHistory = recentMessages.map((m) => ({
+    role: m.from === 'user' ? 'user' : 'assistant',
+    content: m.text,
+  }));
+
+  const payload = {
+    model: process.env.BARISKA_MODEL || 'gpt-4o-mini',
+    messages: [
+      { role: 'system', content: systemInstruction },
+      ...conversationHistory,
+    ],
+    temperature: 0.3,
+  };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = (await response.json().catch(() => ({}))) as any;
+
+  if (!response.ok) {
+    const errorDetail = data?.error?.message || data?.message || `HTTP ${response.status} Gagal memproses ke Bariska Cloud`;
+    throw new Error(errorDetail);
+  }
+
+  const replyText =
+    data?.choices?.[0]?.message?.content ||
+    data?.choices?.[0]?.text ||
+    data?.reply;
+
+  if (!replyText) {
+    throw new Error('Tidak menerima teks respon dari Bariska Cloud.');
+  }
+
+  return replyText;
 }
