@@ -67,7 +67,7 @@ Buat file `.env` di root project dengan referensi dari `.env.example`:
 
 ```bash
 # Wajib: API Key untuk Google Gemini API
-GEMINI_API_KEY=your_gemini_api_key_here
+AI_API_KEY=your_gemini_api_key_here
 
 # Port server (default: 3000)
 PORT=3000

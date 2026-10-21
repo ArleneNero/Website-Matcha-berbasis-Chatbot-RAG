@@ -70,7 +70,7 @@ async function startServer() {
     console.log(`🍵 Xiaomimi Backend running on http://0.0.0.0:${PORT}`);
 
     // Pre-warm RAG vector index in background if API key is present
-    if (process.env.GEMINI_API_KEY) {
+    if (process.env.AI_API_KEY || process.env.GEMINI_API_KEY) {
       try {
         const ai = getAiClient();
         vectorStore.ensureIndexed(ai).catch((err) => {
