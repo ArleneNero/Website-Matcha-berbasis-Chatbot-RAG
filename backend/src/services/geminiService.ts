@@ -8,6 +8,42 @@ export interface ChatMessage {
   text: string;
 }
 
+let verifiedModel: string | null = null;
+
+async function discoverAvailableModel(baseUrl: string, apiKey: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${baseUrl}/models`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as any;
+    const list = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : [];
+    const modelsList: string[] = list
+      .map((item: any) => item?.id || item?.name || (typeof item === 'string' ? item : null))
+      .filter((id: any): id is string => typeof id === 'string');
+
+    console.log('[Bariska Cloud] Available models reported:', modelsList);
+
+    // Prioritize Qwen 3.8 Flash variations
+    const qwen38 = modelsList.find((m) => {
+      const lower = m.toLowerCase();
+      return lower.includes('qwen') && (lower.includes('3.8') || lower.includes('flash'));
+    });
+    if (qwen38) return qwen38;
+
+    // Fallback to any Qwen model
+    const anyQwen = modelsList.find((m) => m.toLowerCase().includes('qwen'));
+    if (anyQwen) return anyQwen;
+
+    if (modelsList.length > 0) return modelsList[0];
+  } catch (err) {
+    console.warn('[Bariska Cloud] Model discovery error:', err);
+  }
+  return null;
+}
+
 export async function generateGroundedReply(
   retrievedContextText: string,
   messages: ChatMessage[]
@@ -41,39 +77,95 @@ ATURAN UTAMA:
     content: m.text,
   }));
 
-  const payload = {
-    model: process.env.BARISKA_MODEL || 'gpt-4o-mini',
-    messages: [
-      { role: 'system', content: systemInstruction },
-      ...conversationHistory,
-    ],
-    temperature: 0.3,
-  };
+  const configuredModel = process.env.BARISKA_MODEL;
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = (await response.json().catch(() => ({}))) as any;
-
-  if (!response.ok) {
-    const errorDetail = data?.error?.message || data?.message || `HTTP ${response.status} Gagal memproses ke Bariska Cloud`;
-    throw new Error(errorDetail);
+  const candidateModels: string[] = [];
+  if (configuredModel) {
+    candidateModels.push(configuredModel);
+  }
+  if (verifiedModel && !candidateModels.includes(verifiedModel)) {
+    candidateModels.push(verifiedModel);
   }
 
-  const replyText =
-    data?.choices?.[0]?.message?.content ||
-    data?.choices?.[0]?.text ||
-    data?.reply;
+  // Common naming patterns for Qwen 3.8 Flash & Qwen models on OpenAI-compatible proxies
+  const defaultCandidates = [
+    'qwen-3.8-flash',
+    'qwen3.8-flash',
+    'Qwen/Qwen3.8-Flash',
+    'qwen/qwen-3.8-flash',
+    'qwen/qwen3.8-flash',
+    'Qwen-3.8-Flash',
+    'qwen-3.8b-flash',
+    'qwen3.8-flash-instruct',
+    'qwen-flash',
+    'qwen2.5-7b-instruct',
+    'qwen-2.5-7b-instruct',
+    'qwen-turbo',
+    'qwen-plus',
+  ];
 
-  if (!replyText) {
-    throw new Error('Tidak menerima teks respon dari Bariska Cloud.');
+  for (const m of defaultCandidates) {
+    if (!candidateModels.includes(m)) {
+      candidateModels.push(m);
+    }
   }
 
-  return replyText;
+  // Attempt dynamic discovery if not already verified
+  if (!verifiedModel) {
+    const discovered = await discoverAvailableModel(baseUrl, apiKey);
+    if (discovered && !candidateModels.includes(discovered)) {
+      candidateModels.unshift(discovered);
+    }
+  }
+
+  let lastError: any = null;
+
+  for (const model of candidateModels) {
+    try {
+      const payload = {
+        model,
+        messages: [
+          { role: 'system', content: systemInstruction },
+          ...conversationHistory,
+        ],
+        temperature: 0.3,
+      };
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = (await response.json().catch(() => ({}))) as any;
+
+      if (!response.ok) {
+        const errorDetail =
+          (typeof data?.error === 'string' ? data.error : data?.error?.message) ||
+          data?.message ||
+          `HTTP ${response.status} Gagal memproses ke model ${model}`;
+        console.warn(`[Bariska Cloud] Model "${model}" failed: ${errorDetail}`);
+        lastError = new Error(errorDetail);
+        continue;
+      }
+
+      const replyText =
+        data?.choices?.[0]?.message?.content ||
+        data?.choices?.[0]?.text ||
+        data?.reply;
+
+      if (replyText) {
+        verifiedModel = model;
+        return replyText;
+      }
+    } catch (err: any) {
+      console.warn(`[Bariska Cloud] Exception trying model "${model}":`, err?.message || err);
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('Tidak menerima tanggapan dari Bariska Cloud.');
 }
