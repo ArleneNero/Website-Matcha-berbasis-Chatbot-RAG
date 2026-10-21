@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { PDFParse } from 'pdf-parse';
 
 export interface DynamicChunk {
   id: string;
@@ -21,15 +20,20 @@ export async function loadAndChunkPDF(pdfFilePath: string): Promise<DynamicChunk
     return [];
   }
 
-  const uint8Data = new Uint8Array(fileBuffer);
-
   try {
     let rawText = '';
+    const pdfParseModule = await import('pdf-parse').catch(() => null);
+    const PDFParse = pdfParseModule?.PDFParse || pdfParseModule?.default;
+
     if (typeof PDFParse === 'function') {
-      const parser = new PDFParse(uint8Data);
-      if (typeof parser.getText === 'function') {
-        const parsed = await parser.getText();
-        rawText = parsed?.text || '';
+      try {
+        const parser = new PDFParse(new Uint8Array(fileBuffer));
+        if (typeof parser.getText === 'function') {
+          const parsed = await parser.getText();
+          rawText = parsed?.text || '';
+        }
+      } catch (err) {
+        console.warn('[PDF Loader] PDFParse execution skipped:', err);
       }
     }
 
@@ -39,7 +43,6 @@ export async function loadAndChunkPDF(pdfFilePath: string): Promise<DynamicChunk
 
     console.log(`[PDF Loader] Extracted ${rawText.length} characters from ${path.basename(pdfFilePath)}.`);
 
-    // Split text into section blocks (e.g. "1. ", "2. ", or double newlines)
     const sections = rawText
       .split(/(?=(?:\r?\n|^)\d+\.\s+)|(?=\r?\n\r?\n)/g)
       .map((s: string) => s.trim())
@@ -48,19 +51,20 @@ export async function loadAndChunkPDF(pdfFilePath: string): Promise<DynamicChunk
     const targetSections = sections.length > 0 ? sections : [rawText];
 
     const chunks: DynamicChunk[] = targetSections.map((sec: string, idx: number) => {
-      const lines = sec.split('\n').map(l => l.trim()).filter(Boolean);
-      const title = lines[0] ? lines[0].substring(0, 60) : `Bagian ${idx + 1}`;
+      const match = sec.match(/^(\d+\.[^\n]+)\n([\s\S]*)$/);
+      const sectionTitle = match ? match[1].trim() : `Bagian ${idx + 1}`;
+      const sectionContent = match ? match[2].trim() : sec.trim();
+
       return {
         id: `pdf_chunk_${idx + 1}`,
-        section: title,
-        text: sec,
+        section: sectionTitle,
+        text: sectionContent,
       };
     });
 
-    console.log(`[PDF Loader] Successfully generated ${chunks.length} dynamic chunks from PDF.`);
     return chunks;
-  } catch (err) {
-    console.error(`[PDF Loader] Failed to parse PDF file:`, err);
+  } catch (error) {
+    console.warn('[PDF Loader] Skipped dynamic PDF parsing, defaulting to embedded sections:', error);
     return [];
   }
 }
